@@ -1,34 +1,38 @@
 import { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { X, Upload, FileText, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Upload, FileText, CheckCircle, AlertCircle, Loader2, Eye } from 'lucide-react';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
+import type { ImportPreviewResult } from '@shared/types';
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
-type ImportStatus = 'idle' | 'importing' | 'success' | 'error';
+type ImportStatus = 'idle' | 'previewing' | 'confirming' | 'importing' | 'success' | 'error';
 
 export default function ImportModal({ open, onClose }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [status, setStatus] = useState<ImportStatus>('idle');
+  const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
   const [result, setResult] = useState<{ success: number; skipped: number; duplicates: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const importBookmarks = useBookmarkStore(s => s.importBookmarks);
+  const previewImport = useBookmarkStore(s => s.previewImport);
 
   if (!open) return null;
 
   const resetState = () => {
     setFile(null);
     setStatus('idle');
+    setPreview(null);
     setResult(null);
     setError(null);
   };
 
   const handleClose = () => {
-    if (status !== 'importing') {
+    if (status !== 'importing' && status !== 'previewing') {
       resetState();
       onClose();
     }
@@ -42,7 +46,9 @@ export default function ImportModal({ open, onClose }: Props) {
     }
     setError(null);
     setFile(f);
+    setPreview(null);
     setResult(null);
+    setStatus('idle');
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -62,6 +68,21 @@ export default function ImportModal({ open, onClose }: Props) {
     handleFile(e.target.files?.[0] || null);
   };
 
+  const handlePreview = async () => {
+    if (!file) return;
+    setStatus('previewing');
+    setError(null);
+    try {
+      const p = await previewImport(file);
+      setPreview(p);
+      setStatus('confirming');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '预览失败';
+      setError(msg);
+      setStatus('error');
+    }
+  };
+
   const handleImport = async () => {
     if (!file) return;
     setStatus('importing');
@@ -70,8 +91,9 @@ export default function ImportModal({ open, onClose }: Props) {
       const r = await importBookmarks(file);
       setResult({ success: r.success, skipped: r.skipped, duplicates: r.duplicates });
       setStatus('success');
-    } catch (err: any) {
-      setError(err.message || '导入失败');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '导入失败';
+      setError(msg);
       setStatus('error');
     }
   };
@@ -104,6 +126,66 @@ export default function ImportModal({ open, onClose }: Props) {
               <button onClick={handleClose} className="btn-primary">
                 完成
               </button>
+            </div>
+          ) : status === 'confirming' && preview ? (
+            <div className="animate-fade-in">
+              <div className="flex items-center gap-2 mb-4">
+                <Eye className="w-5 h-5 text-primary-600" />
+                <h4 className="font-medium text-slate-800">导入预览</h4>
+              </div>
+              <div className="space-y-3 mb-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-slate-50">
+                    <p className="text-xs text-slate-500">预计导入数量</p>
+                    <p className="text-lg font-bold text-slate-800">{preview.totalParsed - preview.existingCount}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-amber-50">
+                    <p className="text-xs text-amber-600">已存在 URL 数量</p>
+                    <p className="text-lg font-bold text-amber-700">{preview.existingCount}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-red-50">
+                    <p className="text-xs text-red-600">同批重复 URL</p>
+                    <p className="text-lg font-bold text-red-700">{preview.batchDuplicateCount}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-primary-50">
+                    <p className="text-xs text-primary-600">涉及文件夹</p>
+                    <p className="text-lg font-bold text-primary-700">{Object.keys(preview.folderStats).length}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1.5">域名统计（前 5）</p>
+                  <div className="space-y-1">
+                    {Object.entries(preview.domainStats)
+                      .sort(([, a], [, b]) => b - a)
+                      .slice(0, 5)
+                      .map(([domain, count]) => (
+                        <div key={domain} className="flex items-center justify-between text-sm">
+                          <span className="text-slate-700 truncate">{domain}</span>
+                          <span className="text-slate-500 font-medium">{count}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1.5">文件夹统计</p>
+                  <div className="space-y-1">
+                    {Object.entries(preview.folderStats).map(([folder, count]) => (
+                      <div key={folder} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-700 truncate">{folder}</span>
+                        <span className="text-slate-500 font-medium">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <button onClick={() => { setPreview(null); setStatus('idle'); }} className="btn-secondary">
+                  返回
+                </button>
+                <button onClick={handleImport} className="btn-primary">
+                  确认导入
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -155,21 +237,24 @@ export default function ImportModal({ open, onClose }: Props) {
               )}
 
               <div className="mt-6 flex justify-end gap-3">
-                <button onClick={handleClose} className="btn-secondary" disabled={status === 'importing'}>
+                <button onClick={handleClose} className="btn-secondary" disabled={status === 'previewing'}>
                   取消
                 </button>
                 <button
-                  onClick={handleImport}
-                  disabled={!file || status === 'importing'}
+                  onClick={handlePreview}
+                  disabled={!file || status === 'previewing'}
                   className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {status === 'importing' ? (
+                  {status === 'previewing' ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      导入中...
+                      预览中...
                     </>
                   ) : (
-                    '开始导入'
+                    <>
+                      <Eye className="w-4 h-4" />
+                      预览导入
+                    </>
                   )}
                 </button>
               </div>

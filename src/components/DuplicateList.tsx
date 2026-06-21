@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link as LinkIcon, Archive, Trash2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { Link as LinkIcon, Archive, Trash2, ChevronDown, ChevronUp, AlertTriangle, Shield } from 'lucide-react';
 import type { DuplicateEntry } from '@shared/types';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 
@@ -7,10 +7,12 @@ export default function DuplicateList() {
   const duplicates = useBookmarkStore(s => s.duplicates);
   const batchArchive = useBookmarkStore(s => s.batchArchive);
   const batchDelete = useBookmarkStore(s => s.batchDelete);
+  const deduplicateKeepOne = useBookmarkStore(s => s.deduplicateKeepOne);
   const loading = useBookmarkStore(s => s.loading);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirmDedup, setConfirmDedup] = useState<{ keepId: number; entry: DuplicateEntry } | null>(null);
 
   const toggleExpand = (url: string) => {
     setExpanded(prev => {
@@ -55,6 +57,21 @@ export default function DuplicateList() {
     setSelected(new Set());
   };
 
+  const handleKeepOne = (keepId: number, entry: DuplicateEntry) => {
+    const others = entry.bookmarks.filter(b => b.id !== keepId && !b.archived);
+    if (others.length === 0) return;
+    setConfirmDedup({ keepId, entry });
+  };
+
+  const confirmKeepOne = async () => {
+    if (!confirmDedup) return;
+    const result = await deduplicateKeepOne(confirmDedup.keepId);
+    setConfirmDedup(null);
+    if (result.archived > 0) {
+      setSelected(new Set());
+    }
+  };
+
   if (duplicates.length === 0) {
     return (
       <div className="card p-8 text-center">
@@ -95,6 +112,7 @@ export default function DuplicateList() {
           const isExpanded = expanded.has(entry.url);
           const allSelected = entry.bookmarks.every(b => selected.has(b.id));
           const someSelected = entry.bookmarks.some(b => selected.has(b.id));
+          const unarchivedCount = entry.bookmarks.filter(b => !b.archived).length;
 
           return (
             <div key={entry.url} className="animate-fade-in">
@@ -146,6 +164,15 @@ export default function DuplicateList() {
                           {bm.archived && <span className="badge bg-slate-200 text-slate-600 ml-2">已归档</span>}
                         </p>
                       </div>
+                      {!bm.archived && unarchivedCount > 1 && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleKeepOne(bm.id, entry); }}
+                          className="p-1.5 rounded-lg hover:bg-white text-slate-500 hover:text-primary-600 transition-colors"
+                          title="保留此项，归档其余重复项"
+                        >
+                          <Shield className="w-4 h-4" />
+                        </button>
+                      )}
                       <a
                         href={bm.url}
                         target="_blank"
@@ -163,6 +190,33 @@ export default function DuplicateList() {
           );
         })}
       </div>
+
+      {confirmDedup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in" onClick={() => setConfirmDedup(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md animate-slide-up p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-4">
+              <Shield className="w-5 h-5 text-primary-600" />
+              <h4 className="font-medium text-slate-800">确认保留并归档其余项</h4>
+            </div>
+            <div className="space-y-2 text-sm text-slate-600 mb-4">
+              <p>将保留: <span className="font-semibold text-primary-700">{confirmDedup.entry.bookmarks.find(b => b.id === confirmDedup.keepId)?.title}</span></p>
+              <p>将归档以下 {confirmDedup.entry.bookmarks.filter(b => b.id !== confirmDedup.keepId && !b.archived).length} 条书签:</p>
+              <ul className="space-y-1 pl-4">
+                {confirmDedup.entry.bookmarks.filter(b => b.id !== confirmDedup.keepId && !b.archived).map(bm => (
+                  <li key={bm.id} className="text-xs text-slate-500">
+                    <span className="font-medium text-slate-700">{bm.title}</span>
+                    <span className="ml-1">— {bm.folder || '无文件夹'}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setConfirmDedup(null)} className="btn-secondary">取消</button>
+              <button onClick={confirmKeepOne} className="btn-primary" disabled={loading}>确认归档</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Archive, Trash2, Link as LinkIcon, FolderOpen, Globe, Tag, X, ChevronDown } from 'lucide-react';
+import { Search, Archive, Trash2, Link as LinkIcon, FolderOpen, Globe, Tag, X, ChevronDown, Calendar } from 'lucide-react';
 import type { Bookmark } from '@shared/types';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 
@@ -7,8 +7,10 @@ export default function Bookmarks() {
   const bookmarks = useBookmarkStore(s => s.bookmarks);
   const domains = useBookmarkStore(s => s.domains);
   const folders = useBookmarkStore(s => s.folders);
+  const tags = useBookmarkStore(s => s.tags);
   const fetchBookmarks = useBookmarkStore(s => s.fetchBookmarks);
   const fetchFolders = useBookmarkStore(s => s.fetchFolders);
+  const fetchTags = useBookmarkStore(s => s.fetchTags);
   const batchArchive = useBookmarkStore(s => s.batchArchive);
   const batchDelete = useBookmarkStore(s => s.batchDelete);
   const toggleArchive = useBookmarkStore(s => s.toggleArchive);
@@ -18,22 +20,29 @@ export default function Bookmarks() {
   const [search, setSearch] = useState('');
   const [filterDomain, setFilterDomain] = useState('');
   const [filterFolder, setFilterFolder] = useState('');
+  const [filterTag, setFilterTag] = useState('');
   const [filterArchived, setFilterArchived] = useState<boolean | undefined>(undefined);
+  const [importedAfter, setImportedAfter] = useState('');
+  const [importedBefore, setImportedBefore] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [groupByDomain, setGroupByDomain] = useState(true);
 
   useEffect(() => {
     fetchFolders();
-  }, [fetchFolders]);
+    fetchTags();
+  }, [fetchFolders, fetchTags]);
 
   useEffect(() => {
-    const params: any = {};
+    const params: Record<string, string | boolean | number> = {};
     if (search) params.search = search;
     if (filterDomain) params.domain = filterDomain;
     if (filterFolder) params.folder = filterFolder;
+    if (filterTag) params.tags = filterTag;
     if (filterArchived !== undefined) params.archived = filterArchived;
+    if (importedAfter) params.importedAfter = importedAfter;
+    if (importedBefore) params.importedBefore = importedBefore;
     fetchBookmarks(params);
-  }, [search, filterDomain, filterFolder, filterArchived, fetchBookmarks]);
+  }, [search, filterDomain, filterFolder, filterTag, filterArchived, importedAfter, importedBefore, fetchBookmarks]);
 
   const toggleSelect = (id: number) => {
     setSelected(prev => {
@@ -79,7 +88,10 @@ export default function Bookmarks() {
     setSearch('');
     setFilterDomain('');
     setFilterFolder('');
+    setFilterTag('');
     setFilterArchived(undefined);
+    setImportedAfter('');
+    setImportedBefore('');
   };
 
   const groupedByDomain: Record<string, Bookmark[]> = {};
@@ -90,7 +102,7 @@ export default function Bookmarks() {
     });
   }
 
-  const hasActiveFilters = search || filterDomain || filterFolder || filterArchived !== undefined;
+  const hasActiveFilters = search || filterDomain || filterFolder || filterTag || filterArchived !== undefined || importedAfter || importedBefore;
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -126,7 +138,7 @@ export default function Bookmarks() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="搜索标题、URL 或标签..."
+              placeholder="搜索标题、URL、文件夹或标签..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="input-search"
@@ -163,6 +175,20 @@ export default function Bookmarks() {
 
           <div className="relative">
             <select
+              value={filterTag}
+              onChange={e => setFilterTag(e.target.value)}
+              className="input pr-10 appearance-none cursor-pointer min-w-[140px]"
+            >
+              <option value="">全部标签</option>
+              {tags.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <select
               value={filterArchived === undefined ? '' : String(filterArchived)}
               onChange={e => setFilterArchived(e.target.value === '' ? undefined : e.target.value === 'true')}
               className="input pr-10 appearance-none cursor-pointer min-w-[140px]"
@@ -172,6 +198,25 @@ export default function Bookmarks() {
               <option value="true">已归档</option>
             </select>
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <input
+              type="date"
+              value={importedAfter}
+              onChange={e => setImportedAfter(e.target.value)}
+              className="input min-w-[140px]"
+              title="导入开始日期"
+            />
+            <span className="text-slate-400 text-sm">至</span>
+            <input
+              type="date"
+              value={importedBefore}
+              onChange={e => setImportedBefore(e.target.value)}
+              className="input min-w-[140px]"
+              title="导入结束日期"
+            />
           </div>
 
           <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">

@@ -1,21 +1,20 @@
 import * as cheerio from 'cheerio';
+import type { AnyNode, Element } from 'domhandler';
 import type { ParsedBookmark } from '../../shared/types.js';
-
-type CheerioElement = any;
 
 export function parseBookmarksHtml(html: string): ParsedBookmark[] {
   const $ = cheerio.load(html);
   const bookmarks: ParsedBookmark[] = [];
   const folderStack: string[] = [];
 
-  function traverseNode(node: CheerioElement): void {
-    if (node.tagName === 'h3') {
+  function traverseNode(node: AnyNode): void {
+    if (node.type === 'tag' && node.tagName === 'h3') {
       const folderName = $(node).text().trim();
       folderStack.push(folderName);
       return;
     }
 
-    if (node.tagName === 'a') {
+    if (node.type === 'tag' && node.tagName === 'a') {
       const $a = $(node);
       const title = $a.text().trim() || 'Untitled';
       const url = $a.attr('href') || '';
@@ -29,30 +28,37 @@ export function parseBookmarksHtml(html: string): ParsedBookmark[] {
       return;
     }
 
-    if (node.tagName === 'dl' || node.tagName === 'dt' || node.type === 'root') {
+    if ((node.type === 'tag' && (node.tagName === 'dl' || node.tagName === 'dt')) || node.type === 'root') {
       const prevFolderDepth = folderStack.length;
-      $(node).contents().each((_, child) => {
+      const children = node.childNodes || [];
+      for (const child of children) {
         if (child.type === 'tag' || child.type === 'root') {
-          traverseNode(child as CheerioElement);
+          traverseNode(child);
         }
-      });
+      }
       while (folderStack.length > prevFolderDepth) {
         folderStack.pop();
       }
     } else {
-      $(node).contents().each((_, child) => {
+      const children = (node as Element).childNodes || [];
+      for (const child of children) {
         if (child.type === 'tag') {
-          traverseNode(child as CheerioElement);
+          traverseNode(child);
         }
-      });
+      }
     }
   }
 
-  $('body').contents().each((_, el) => {
-    if (el.type === 'tag') {
-      traverseNode(el as CheerioElement);
+  const body = $('body');
+  const bodyEl = body.get(0);
+  if (bodyEl) {
+    const children = bodyEl.childNodes || [];
+    for (const child of children) {
+      if (child.type === 'tag') {
+        traverseNode(child);
+      }
     }
-  });
+  }
 
   return bookmarks;
 }

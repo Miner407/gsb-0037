@@ -5,12 +5,15 @@ const router = Router();
 
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, domain, folder, archived, limit, offset } = req.query;
+    const { search, domain, folder, tags, archived, importedAfter, importedBefore, limit, offset } = req.query;
     const bookmarks = await bookmarkService.getBookmarks({
       search: search as string,
       domain: domain as string,
       folder: folder as string,
+      tags: tags as string,
       archived: archived !== undefined ? archived === 'true' : undefined,
+      importedAfter: importedAfter as string,
+      importedBefore: importedBefore as string,
       limit: limit ? parseInt(limit as string, 10) : undefined,
       offset: offset ? parseInt(offset as string, 10) : undefined,
     });
@@ -21,13 +24,37 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/folders', async (req: Request, res: Response) => {
+router.get('/folders', async (_req: Request, res: Response) => {
   try {
     const folders = await bookmarkService.getAllFolders();
     res.json({ success: true, data: folders });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Failed to fetch folders' });
+  }
+});
+
+router.get('/tags', async (_req: Request, res: Response) => {
+  try {
+    const tags = await bookmarkService.getAllTags();
+    res.json({ success: true, data: tags });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Failed to fetch tags' });
+  }
+});
+
+router.post('/deduplicate', async (req: Request, res: Response) => {
+  try {
+    const { keepId } = req.body;
+    if (typeof keepId !== 'number' || !keepId) {
+      return res.status(400).json({ success: false, error: 'keepId must be a number' });
+    }
+    const result = await bookmarkService.deduplicateKeepOne(keepId);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Failed to deduplicate' });
   }
 });
 

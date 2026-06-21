@@ -48,3 +48,26 @@ export interface ParsedBookmark {
   folder: string;
   tags: string[];
 }
+
+export interface ImportPreviewResult {
+  totalParsed: number;
+  existingCount: number;
+  batchDuplicateCount: number;
+  folderStats: Record<string, number>;
+  domainStats: Record<string, number>;
+}
+
+export interface DeduplicateResult {
+  keepId: number;
+  kept: Bookmark;
+  archived: number;
+  archivedBookmarks: Bookmark[];
+}
+
+export interface CleanupSuggestions {
+  duplicateGroups: number;
+  archiveableCount: number;
+  topDomains7d: DomainStat[];
+  emptyTitleCount: number;
+  invalidUrlCount: number;
+}

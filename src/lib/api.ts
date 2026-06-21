@@ -1,4 +1,4 @@
-import type { Bookmark, StatsOverview, DuplicateEntry, DomainStat, ImportResult } from '@shared/types';
+import type { Bookmark, StatsOverview, DuplicateEntry, DomainStat, ImportResult, ImportPreviewResult, DeduplicateResult, CleanupSuggestions } from '@shared/types';
 
 const BASE_URL = '/api';
 
@@ -21,7 +21,10 @@ export async function getBookmarks(params?: {
   search?: string;
   domain?: string;
   folder?: string;
+  tags?: string;
   archived?: boolean;
+  importedAfter?: string;
+  importedBefore?: string;
   limit?: number;
   offset?: number;
 }): Promise<Bookmark[]> {
@@ -39,6 +42,10 @@ export async function getBookmarks(params?: {
 
 export async function getFolders(): Promise<string[]> {
   return request<string[]>('/bookmarks/folders');
+}
+
+export async function getTags(): Promise<string[]> {
+  return request<string[]>('/bookmarks/tags');
 }
 
 export async function getBookmark(id: number): Promise<Bookmark> {
@@ -77,6 +84,27 @@ export async function batchDelete(ids: number[]): Promise<{ deleted: number }> {
   });
 }
 
+export async function deduplicateKeepOne(keepId: number): Promise<DeduplicateResult> {
+  return request<DeduplicateResult>('/bookmarks/deduplicate', {
+    method: 'POST',
+    body: JSON.stringify({ keepId }),
+  });
+}
+
+export async function previewImport(file: File): Promise<ImportPreviewResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE_URL}/import/preview`, {
+    method: 'POST',
+    body: formData,
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'Preview failed');
+  }
+  return data.data;
+}
+
 export async function importBookmarks(file: File): Promise<ImportResult> {
   const formData = new FormData();
   formData.append('file', file);
@@ -101,6 +129,10 @@ export async function getDuplicates(): Promise<DuplicateEntry[]> {
 
 export async function getDomainStats(): Promise<DomainStat[]> {
   return request<DomainStat[]>('/stats/domains');
+}
+
+export async function getCleanupSuggestions(): Promise<CleanupSuggestions> {
+  return request<CleanupSuggestions>('/stats/cleanup-suggestions');
 }
 
 export async function getRecentBookmarks(limit?: number): Promise<Bookmark[]> {

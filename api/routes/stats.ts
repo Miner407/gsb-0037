@@ -3,7 +3,7 @@ import * as bookmarkService from '../services/bookmarkService.js';
 
 const router = Router();
 
-router.get('/overview', async (req: Request, res: Response) => {
+router.get('/overview', async (_req: Request, res: Response) => {
   try {
     const stats = await bookmarkService.getStatsOverview();
     res.json({ success: true, data: stats });
@@ -13,7 +13,7 @@ router.get('/overview', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/duplicates', async (req: Request, res: Response) => {
+router.get('/duplicates', async (_req: Request, res: Response) => {
   try {
     const duplicates = await bookmarkService.getDuplicates();
     res.json({ success: true, data: duplicates });
@@ -23,13 +23,23 @@ router.get('/duplicates', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/domains', async (req: Request, res: Response) => {
+router.get('/domains', async (_req: Request, res: Response) => {
   try {
     const domains = await bookmarkService.getDomainStats();
     res.json({ success: true, data: domains });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Failed to fetch domain stats' });
+  }
+});
+
+router.get('/cleanup-suggestions', async (_req: Request, res: Response) => {
+  try {
+    const suggestions = await bookmarkService.getCleanupSuggestions();
+    res.json({ success: true, data: suggestions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Failed to fetch cleanup suggestions' });
   }
 });
 

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { Bookmark, StatsOverview, DuplicateEntry, DomainStat, ImportResult } from '@shared/types';
 import * as api from '@/lib/api';
 
+type FetchBookmarksParams = Parameters<typeof api.getBookmarks>[0];
+
 interface BookmarkState {
   bookmarks: Bookmark[];
   overview: StatsOverview;
@@ -9,22 +11,42 @@ interface BookmarkState {
   domains: DomainStat[];
   recent: Bookmark[];
   folders: string[];
+  tags: string[];
   loading: boolean;
   error: string | null;
 
   fetchAll: () => Promise<void>;
-  fetchBookmarks: (params?: any) => Promise<void>;
+  fetchBookmarks: (params?: FetchBookmarksParams) => Promise<void>;
   fetchOverview: () => Promise<void>;
   fetchDuplicates: () => Promise<void>;
   fetchDomains: () => Promise<void>;
   fetchRecent: () => Promise<void>;
   fetchFolders: () => Promise<void>;
+  fetchTags: () => Promise<void>;
 
   importBookmarks: (file: File) => Promise<ImportResult>;
+  previewImport: (file: File) => Promise<ImportPreviewResult>;
   toggleArchive: (id: number) => Promise<void>;
   batchArchive: (ids: number[], archived: boolean) => Promise<void>;
   deleteBookmark: (id: number) => Promise<void>;
   batchDelete: (ids: number[]) => Promise<void>;
+  deduplicateKeepOne: (keepId: number) => Promise<{ archived: number }>;
+}
+
+export interface ImportPreviewResult {
+  totalParsed: number;
+  existingCount: number;
+  batchDuplicateCount: number;
+  folderStats: Record<string, number>;
+  domainStats: Record<string, number>;
+}
+
+export interface CleanupSuggestions {
+  duplicateGroups: number;
+  archiveableCount: number;
+  topDomains7d: { domain: string; count: number }[];
+  emptyTitleCount: number;
+  invalidUrlCount: number;
 }
 
 const initialOverview: StatsOverview = {
@@ -34,6 +56,10 @@ const initialOverview: StatsOverview = {
   archivedCount: 0,
 };
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export const useBookmarkStore = create<BookmarkState>((set, get) => ({
   bookmarks: [],
   overview: initialOverview,
@@ -41,6 +67,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
   domains: [],
   recent: [],
   folders: [],
+  tags: [],
   loading: false,
   error: null,
 
@@ -53,9 +80,10 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
         get().fetchDomains(),
         get().fetchRecent(),
         get().fetchFolders(),
+        get().fetchTags(),
       ]);
-    } catch (err: any) {
-      set({ error: err.message });
+    } catch (err: unknown) {
+      set({ error: getErrorMessage(err) });
     } finally {
       set({ loading: false });
     }
@@ -65,8 +93,8 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
     try {
       const data = await api.getBookmarks(params);
       set({ bookmarks: data });
-    } catch (err: any) {
-      set({ error: err.message });
+    } catch (err: unknown) {
+      set({ error: getErrorMessage(err) });
     }
   },
 
@@ -95,9 +123,19 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
     set({ folders: data });
   },
 
+  fetchTags: async () => {
+    const data = await api.getTags();
+    set({ tags: data });
+  },
+
   importBookmarks: async (file) => {
     const result = await api.importBookmarks(file);
     await get().fetchAll();
+    return result;
+  },
+
+  previewImport: async (file) => {
+    const result = await api.previewImport(file);
     return result;
   },
 
@@ -122,5 +160,11 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
   batchDelete: async (ids) => {
     await api.batchDelete(ids);
     await get().fetchAll();
+  },
+
+  deduplicateKeepOne: async (keepId) => {
+    const result = await api.deduplicateKeepOne(keepId);
+    await get().fetchAll();
+    return result;
   },
 }));

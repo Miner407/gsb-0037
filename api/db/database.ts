@@ -2,7 +2,6 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { promisify } from 'util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +58,7 @@ function initDb(db: sqlite3.Database): void {
   });
 }
 
-export function dbRun(db: sqlite3.Database, sql: string, params: any[] = []): Promise<sqlite3.RunResult> {
+export function dbRun(db: sqlite3.Database, sql: string, params: unknown[] = []): Promise<sqlite3.RunResult> {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (this: sqlite3.RunResult, err: Error | null) {
       if (err) reject(err);
@@ -68,7 +67,7 @@ export function dbRun(db: sqlite3.Database, sql: string, params: any[] = []): Pr
   });
 }
 
-export function dbGet<T>(db: sqlite3.Database, sql: string, params: any[] = []): Promise<T | undefined> {
+export function dbGet<T>(db: sqlite3.Database, sql: string, params: unknown[] = []): Promise<T | undefined> {
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err: Error | null, row: T) => {
       if (err) reject(err);
@@ -77,7 +76,7 @@ export function dbGet<T>(db: sqlite3.Database, sql: string, params: any[] = []):
   });
 }
 
-export function dbAll<T>(db: sqlite3.Database, sql: string, params: any[] = []): Promise<T[]> {
+export function dbAll<T>(db: sqlite3.Database, sql: string, params: unknown[] = []): Promise<T[]> {
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err: Error | null, rows: T[]) => {
       if (err) reject(err);

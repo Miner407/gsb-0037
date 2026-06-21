@@ -2,7 +2,7 @@ import sqlite3 from 'sqlite3';
 import { getDb, dbRun, dbGet, dbAll } from '../db/database.js';
 import { extractDomain, normalizeUrl } from '../utils/url.js';
 import { parseBookmarksHtml } from '../utils/bookmarkParser.js';
-import type { Bookmark, BookmarkInput, StatsOverview, DuplicateEntry, DomainStat, ImportResult, ParsedBookmark } from '../../shared/types.js';
+import type { Bookmark, BookmarkInput, StatsOverview, DuplicateEntry, DomainStat, ImportResult, ImportPreviewResult, DeduplicateResult, CleanupSuggestions } from '../../shared/types.js';
 
 interface BookmarkRow {
   id: number;
@@ -34,18 +34,21 @@ export async function getBookmarks(params: {
   search?: string;
   domain?: string;
   folder?: string;
+  tags?: string;
   archived?: boolean;
+  importedAfter?: string;
+  importedBefore?: string;
   limit?: number;
   offset?: number;
 } = {}): Promise<Bookmark[]> {
   const db = getDb();
   const conditions: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
 
   if (params.search) {
-    conditions.push('(title LIKE ? OR url LIKE ? OR tags LIKE ?)');
+    conditions.push('(title LIKE ? OR url LIKE ? OR folder LIKE ? OR tags LIKE ?)');
     const searchTerm = `%${params.search}%`;
-    values.push(searchTerm, searchTerm, searchTerm);
+    values.push(searchTerm, searchTerm, searchTerm, searchTerm);
   }
   if (params.domain) {
     conditions.push('domain = ?');
@@ -55,9 +58,23 @@ export async function getBookmarks(params: {
     conditions.push('folder = ?');
     values.push(params.folder);
   }
+  if (params.tags) {
+    const tagList = params.tags.split(',').map(t => t.trim()).filter(Boolean);
+    const tagConditions = tagList.map(() => 'tags LIKE ?');
+    conditions.push(`(${tagConditions.join(' OR ')})`);
+    tagList.forEach(tag => values.push(`%"${tag}"%`));
+  }
   if (params.archived !== undefined) {
     conditions.push('archived = ?');
     values.push(params.archived ? 1 : 0);
+  }
+  if (params.importedAfter) {
+    conditions.push('imported_at >= ?');
+    values.push(params.importedAfter);
+  }
+  if (params.importedBefore) {
+    conditions.push('imported_at <= ?');
+    values.push(params.importedBefore);
   }
 
   let sql = 'SELECT * FROM bookmarks';
@@ -104,7 +121,7 @@ export async function createBookmark(input: BookmarkInput): Promise<Bookmark> {
 export async function updateBookmark(id: number, updates: Partial<Pick<Bookmark, 'title' | 'url' | 'folder' | 'tags' | 'archived'>>): Promise<Bookmark | null> {
   const db = getDb();
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
 
   if (updates.title !== undefined) { fields.push('title = ?'); values.push(updates.title); }
   if (updates.url !== undefined) {
@@ -130,7 +147,7 @@ export async function deleteBookmark(id: number): Promise<boolean> {
   return (result.changes || 0) > 0;
 }
 
-function stmtRun(stmt: sqlite3.Statement, params: any[]): Promise<void> {
+function stmtRun(stmt: sqlite3.Statement, params: unknown[]): Promise<void> {
   return new Promise((resolve, reject) => {
     stmt.run(params, (err: Error | null) => {
       if (err) reject(err);
@@ -146,6 +163,45 @@ function stmtFinalize(stmt: sqlite3.Statement): Promise<void> {
       else resolve();
     });
   });
+}
+
+export async function previewImportBookmarks(htmlContent: string): Promise<ImportPreviewResult> {
+  const parsed = parseBookmarksHtml(htmlContent);
+  const db = getDb();
+
+  const existingUrls = new Set<string>();
+  const existingRows = await dbAll<{ url: string }>(db, 'SELECT DISTINCT url FROM bookmarks');
+  existingRows.forEach(r => existingUrls.add(r.url));
+
+  let existingCount = 0;
+  const batchUrlCount: Record<string, number> = {};
+  const folderStats: Record<string, number> = {};
+  const domainStats: Record<string, number> = {};
+
+  for (const bm of parsed) {
+    const normalizedUrl = normalizeUrl(bm.url);
+    if (existingUrls.has(normalizedUrl)) {
+      existingCount++;
+    }
+    batchUrlCount[normalizedUrl] = (batchUrlCount[normalizedUrl] || 0) + 1;
+    const folder = bm.folder || '(无文件夹)';
+    folderStats[folder] = (folderStats[folder] || 0) + 1;
+    const domain = extractDomain(bm.url);
+    domainStats[domain] = (domainStats[domain] || 0) + 1;
+  }
+
+  let batchDuplicateCount = 0;
+  for (const count of Object.values(batchUrlCount)) {
+    if (count > 1) batchDuplicateCount += count - 1;
+  }
+
+  return {
+    totalParsed: parsed.length,
+    existingCount,
+    batchDuplicateCount,
+    folderStats,
+    domainStats,
+  };
 }
 
 export async function importBookmarks(htmlContent: string): Promise<ImportResult> {
@@ -198,13 +254,56 @@ async function countDuplicates(db: sqlite3.Database): Promise<number> {
   return row?.cnt || 0;
 }
 
+export async function deduplicateKeepOne(keepId: number): Promise<DeduplicateResult> {
+  const db = getDb();
+  const keepBookmark = await getBookmarkById(keepId);
+  if (!keepBookmark) {
+    throw new Error('Bookmark not found');
+  }
+
+  const rows = await dbAll<BookmarkRow>(
+    db,
+    'SELECT * FROM bookmarks WHERE url = ? AND id != ? AND archived = 0',
+    [keepBookmark.url, keepId]
+  );
+
+  if (rows.length === 0) {
+    return {
+      keepId,
+      kept: keepBookmark,
+      archived: 0,
+      archivedBookmarks: [],
+    };
+  }
+
+  const idsToArchive = rows.map(r => r.id);
+  const placeholders = idsToArchive.map(() => '?').join(',');
+  await dbRun(
+    db,
+    `UPDATE bookmarks SET archived = 1 WHERE id IN (${placeholders})`,
+    idsToArchive
+  );
+
+  const archivedBookmarks = rows.map(rowToBookmark);
+  for (const bm of archivedBookmarks) {
+    bm.archived = true;
+  }
+
+  return {
+    keepId,
+    kept: keepBookmark,
+    archived: idsToArchive.length,
+    archivedBookmarks,
+  };
+}
+
 export async function batchUpdate(ids: number[], updates: { archived?: boolean }): Promise<number> {
   const db = getDb();
   if (ids.length === 0) return 0;
 
   const placeholders = ids.map(() => '?').join(',');
   let sql = 'UPDATE bookmarks SET ';
-  const values: any[] = [];
+  const values: unknown[] = [];
 
   if (updates.archived !== undefined) {
     sql += 'archived = ?';
@@ -288,4 +387,77 @@ export async function getAllFolders(): Promise<string[]> {
     'SELECT DISTINCT folder FROM bookmarks WHERE folder != \'\' ORDER BY folder'
   );
   return rows.map(r => r.folder).filter(Boolean);
+}
+
+export async function getAllTags(): Promise<string[]> {
+  const db = getDb();
+  const rows = await dbAll<{ tags: string }>(db, 'SELECT DISTINCT tags FROM bookmarks');
+  const tagSet = new Set<string>();
+  rows.forEach(r => {
+    try {
+      const parsed: string[] = JSON.parse(r.tags || '[]');
+      parsed.forEach(tag => tagSet.add(tag));
+    } catch { /* skip invalid */ }
+  });
+  return Array.from(tagSet).sort();
+}
+
+export async function getCleanupSuggestions(): Promise<CleanupSuggestions> {
+  const db = getDb();
+
+  const dupGroupsRow = await dbGet<{ cnt: number }>(
+    db,
+    'SELECT COUNT(*) as cnt FROM (SELECT url FROM bookmarks GROUP BY url HAVING COUNT(*) > 1)'
+  );
+  const duplicateGroups = dupGroupsRow?.cnt || 0;
+
+  const archiveableRow = await dbGet<{ cnt: number }>(
+    db,
+    `SELECT COUNT(*) as cnt FROM bookmarks WHERE url IN (
+      SELECT url FROM bookmarks GROUP BY url HAVING COUNT(*) > 1
+    ) AND archived = 0`
+  );
+  const archiveableCount = archiveableRow?.cnt || 0;
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const topDomains7dRows = await dbAll<{ domain: string; cnt: number }>(
+    db,
+    'SELECT domain, COUNT(*) as cnt FROM bookmarks WHERE imported_at >= ? GROUP BY domain ORDER BY cnt DESC LIMIT 5',
+    [sevenDaysAgo]
+  );
+  const topDomains7d = topDomains7dRows.map(r => ({ domain: r.domain, count: r.cnt }));
+
+  const emptyTitleRow = await dbGet<{ cnt: number }>(
+    db,
+    "SELECT COUNT(*) as cnt FROM bookmarks WHERE title = '' OR title = 'Untitled'"
+  );
+  const emptyTitleCount = emptyTitleRow?.cnt || 0;
+
+  const allBookmarks = await dbAll<BookmarkRow>(db, 'SELECT url FROM bookmarks');
+  let invalidUrlCount = 0;
+  for (const row of allBookmarks) {
+    if (isInvalidUrl(row.url)) {
+      invalidUrlCount++;
+    }
+  }
+
+  return {
+    duplicateGroups,
+    archiveableCount,
+    topDomains7d,
+    emptyTitleCount,
+    invalidUrlCount,
+  };
+}
+
+function isInvalidUrl(url: string): boolean {
+  if (!url) return true;
+  if (!url.includes('://')) return true;
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname || parsed.hostname === '') return true;
+    return false;
+  } catch {
+    return true;
+  }
 }
